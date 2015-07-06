@@ -2987,23 +2987,38 @@ Processor.prototype.flatten = function(input) {
  * @return the framed output.
  */
 Processor.prototype.frame = function(input, frame, options) {
+  // validate top-level frame
+  _validateFrame(frame);
+
   // create framing state
   var state = {
     options: options,
-    graphs: {'@default': {}, '@merged': {}},
+    graphs: {'@default': {}},
     subjectStack: [],
-    link: {}
+    graphStack: [],
+    link: {'@default': {}}
   };
 
+  // if `@graph: {}`
+  if(_isObject(frame[0]['@graph']) &&
+    Object.keys(frame[0]['@graph']).length === 0) {
+    // only look in default graph for matches
+    state.graph = '@default';
+  } else {
+    // merge all graphs and search in all of them
+    state.graph = '@merged';
+    state.graphs['@merged'] = {};
+    state.link['@merged'] = {};
+  }
+
   // produce a map of all graphs and name each bnode
-  // FIXME: currently uses subjects from @merged graph only
   var namer = new UniqueNamer('_:b');
-  _createNodeMap(input, state.graphs, '@merged', namer);
-  state.subjects = state.graphs['@merged'];
+  _createNodeMap(input, state.graphs, state.graph, namer);
 
   // frame the subjects
   var framed = [];
-  _frame(state, Object.keys(state.subjects).sort(), frame, framed, null);
+  var subjects = Object.keys(state.graphs[state.graph]).sort();
+  _frame(state, subjects, frame, framed, null);
   return framed;
 };
 
@@ -4359,6 +4374,12 @@ function _frame(state, subjects, frame, parent, property) {
     requireAll: _getFrameFlag(frame, options, 'requireAll')
   };
 
+  // get link for current graph
+  var link = state.link[state.graph];
+  if(!link) {
+    state.link[state.graph] = link = {};
+  }
+
   // filter out subjects that match the frame
   var matches = _filterSubjects(state, subjects, frame, flags);
 
@@ -4368,7 +4389,7 @@ function _frame(state, subjects, frame, parent, property) {
     var id = ids[idx];
     var subject = matches[id];
 
-    if(flags.embed === '@link' && id in state.link) {
+    if(flags.embed === '@link' && id in link) {
       // TODO: may want to also match an existing linked subject against
       // the current frame ... so different frames could produce different
       // subjects that are only shared in-memory when the frames are the same
@@ -4383,19 +4404,22 @@ function _frame(state, subjects, frame, parent, property) {
     which only occurs at the top-level. */
     if(property === null) {
       state.uniqueEmbeds = {};
+      state.uniqueEmbeds[state.graph] = {};
+    } else if(!(state.graph in state.uniqueEmbeds)) {
+      state.uniqueEmbeds[state.graph] = {};
     }
 
     // start output for subject
     var output = {};
     output['@id'] = id;
-    state.link[id] = output;
+    link[id] = output;
 
     // if embed is @never or if a circular reference would be created by an
     // embed, the subject cannot be embedded, just add the reference;
     // note that a circular reference won't occur when the embed flag is
     // `@link` as the above check will short-circuit before reaching this point
     if(flags.embed === '@never' ||
-      _createsCircularReference(subject, state.subjectStack)) {
+      _createsCircularReference(subject, state.graph, state.subjectStack)) {
       _addFrameOutput(parent, property, output);
       continue;
     }
@@ -4403,14 +4427,30 @@ function _frame(state, subjects, frame, parent, property) {
     // if only the last match should be embedded
     if(flags.embed === '@last') {
       // remove any existing embed
-      if(id in state.uniqueEmbeds) {
+      if(id in state.uniqueEmbeds[state.graph]) {
         _removeEmbed(state, id);
       }
-      state.uniqueEmbeds[id] = {parent: parent, property: property};
+      state.uniqueEmbeds[state.graph][id] = {
+        parent: parent,
+        property: property
+      };
     }
 
     // push matching subject onto stack to enable circular embed checks
-    state.subjectStack.push(subject);
+    state.subjectStack.push({
+      subject: subject,
+      graph: state.graph
+    });
+
+    // TODO: if state.graph is `@default` and `id` is a graph, then add
+    // '@graph' to `output`, then recurse into _frame
+    // state.graphStack.push(state.graph);
+    // state.graph = id;
+    // var implicitFrame = ...
+    // _frame(state, Object.keys(state.graphs[id]), implicitFrame, flags);
+    // state.graph = state.graphStack.pop();
+    // _addFrameOutput(...)
+    // continue;
 
     // iterate over subject properties
     var props = Object.keys(subject).sort();
@@ -4527,13 +4567,15 @@ function _createImplicitFrame(flags) {
  * would cause a circular reference.
  *
  * @param subjectToEmbed the subject to embed.
+ * @param graph the graph the subject to embed is in.
  * @param subjectStack the current stack of subjects.
  *
  * @return true if a circular reference would be created, false if not.
  */
-function _createsCircularReference(subjectToEmbed, subjectStack) {
+function _createsCircularReference(subjectToEmbed, graph, subjectStack) {
   for(var i = subjectStack.length - 1; i >= 0; --i) {
-    if(subjectStack[i]['@id'] === subjectToEmbed['@id']) {
+    if(subjectStack[i].graph === graph &&
+      subjectStack[i].subject['@id'] === subjectToEmbed['@id']) {
       return true;
     }
   }
@@ -4596,7 +4638,7 @@ function _filterSubjects(state, subjects, frame, flags) {
   var rval = {};
   for(var i = 0; i < subjects.length; ++i) {
     var id = subjects[i];
-    var subject = state.subjects[id];
+    var subject = state.graphs[state.graph][id];
     if(_filterSubject(subject, frame, flags)) {
       rval[id] = subject;
     }
@@ -4680,7 +4722,7 @@ function _filterSubject(subject, frame, flags) {
  */
 function _removeEmbed(state, id) {
   // get existing embed
-  var embeds = state.uniqueEmbeds;
+  var embeds = state.uniqueEmbeds[state.graph];
   var embed = embeds[id];
   var parent = embed.parent;
   var property = embed.property;
