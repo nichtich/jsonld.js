@@ -1,0 +1,9 @@
+{
+  "@context": {
+    "@vocab": "urn:"
+  },
+  "@type": "Class",
+  "term": {
+    "@graph": {}
+  }
+}

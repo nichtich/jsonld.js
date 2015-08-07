@@ -2999,9 +2999,10 @@ Processor.prototype.frame = function(input, frame, options) {
     link: {'@default': {}}
   };
 
-  // if `@graph: {}`
-  if(_isObject(frame[0]['@graph']) &&
-    Object.keys(frame[0]['@graph']).length === 0) {
+  // if `@graph: [{}]` (ignore invalid `@graph: [{}, ...]`)
+  if('@graph' in frame[0] &&
+    _isObject(frame[0]['@graph'][0]) &&
+    Object.keys(frame[0]['@graph'][0]).length === 0) {
     // only look in default graph for matches
     state.graph = '@default';
   } else {
@@ -3014,6 +3015,8 @@ Processor.prototype.frame = function(input, frame, options) {
   // produce a map of all graphs and name each bnode
   var namer = new UniqueNamer('_:b');
   _createNodeMap(input, state.graphs, state.graph, namer);
+
+  // TODO: fix 'state.link' for changes to @merged
 
   // frame the subjects
   var framed = [];
@@ -4252,8 +4255,10 @@ function _createNodeMap(input, graphs, graph, namer, name, list) {
       if(!(name in graphs)) {
         graphs[name] = {};
       }
-      var g = (graph === '@merged') ? graph : name;
-      _createNodeMap(input[property], graphs, g, namer);
+      if('@merged' in graphs) {
+        _createNodeMap(input[property], graphs, '@merged', namer);
+      }
+      _createNodeMap(input[property], graphs, name, namer);
       continue;
     }
 
@@ -4365,6 +4370,7 @@ function _frame(state, subjects, frame, parent, property) {
   // validate the frame
   _validateFrame(frame);
   frame = frame[0];
+  console.log('the frame', JSON.stringify(frame, null, 2));
 
   // get flags for current frame
   var options = state.options;
@@ -4442,15 +4448,15 @@ function _frame(state, subjects, frame, parent, property) {
       graph: state.graph
     });
 
-    // TODO: if state.graph is `@default` and `id` is a graph, then add
-    // '@graph' to `output`, then recurse into _frame
-    // state.graphStack.push(state.graph);
-    // state.graph = id;
-    // var implicitFrame = ...
-    // _frame(state, Object.keys(state.graphs[id]), implicitFrame, flags);
-    // state.graph = state.graphStack.pop();
-    // _addFrameOutput(...)
-    // continue;
+    // if subject is a graph, recurse into it
+    if(id in state.graphs) {
+      console.log('\n***recurse', id, state.graphs);
+      console.log('recursion frame', frame);
+      state.graphStack.push(state.graph);
+      state.graph = id;
+      _frame(state, Object.keys(state.graphs[id]), [frame], output, '@graph');
+      state.graph = state.graphStack.pop();
+    }
 
     // iterate over subject properties
     var props = Object.keys(subject).sort();
@@ -4497,6 +4503,7 @@ function _frame(state, subjects, frame, parent, property) {
         }
 
         if(_isSubjectReference(o)) {
+          console.log('subject ref', o, prop);
           // recurse into subject reference
           var subframe = (prop in frame ?
             frame[prop] : _createImplicitFrame(flags));
