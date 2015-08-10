@@ -4490,8 +4490,9 @@ function _frame(state, subjects, frame, parent, property) {
       graph: state.graph
     });
 
-    // if subject is a graph, recurse into it
-    if(id in state.graphMap) {
+    // if not selecting from the merged graph and the subject is a graph,
+    // recurse into it
+    if(state.graph !== '@merged' && id in state.graphMap) {
       console.log('\n***recurse', id, state.graphMap);
       console.log('recursion frame', frame);
       state.graphStack.push(state.graph);
