@@ -1121,7 +1121,7 @@ jsonld.merge = function(docs, ctx, options, callback) {
       }
 
       // add all non-default graphs to default graph
-      defaultGraph = _mergeNodeMaps(graphs);
+      defaultGraph = _mergeNamedGraphsIntoDefault(graphs);
     } catch(ex) {
       return callback(ex);
     }
@@ -2951,7 +2951,7 @@ Processor.prototype.createNodeMap = function(input, options) {
   _createNodeMap(input, graphs, '@default', namer);
 
   // add all non-default graphs to default graph
-  return _mergeNodeMaps(graphs);
+  return _mergeNamedGraphsIntoDefault(graphs);
 };
 
 /**
@@ -2989,39 +2989,41 @@ Processor.prototype.flatten = function(input) {
 Processor.prototype.frame = function(input, frame, options) {
   // validate top-level frame
   _validateFrame(frame);
-
+try {
   // create framing state
   var state = {
     options: options,
-    graphs: {'@default': {}},
-    subjectStack: [],
+    graphMap: {'@default': {}},
     graphStack: [],
+    subjectStack: [],
     link: {'@default': {}}
   };
+
+  // populate graph map
+  var namer = new UniqueNamer('_:b');
+  _createNodeMap(input, state.graphMap, '@default', namer);
+  console.log('graphMap', JSON.stringify(state.graphMap, null, 2));
 
   // if `@graph: [{}]` (ignore invalid `@graph: [{}, ...]`)
   if('@graph' in frame[0] &&
     _isObject(frame[0]['@graph'][0]) &&
     Object.keys(frame[0]['@graph'][0]).length === 0) {
-    // only look in default graph for matches
+    // only look in default graph for frame matches
     state.graph = '@default';
   } else {
-    // merge all graphs and search in all of them
+    // search in a merge of all graphs for frame matches
     state.graph = '@merged';
-    state.graphs['@merged'] = {};
     state.link['@merged'] = {};
+    _createMergedGraph(state.graphMap);
   }
-
-  // produce a map of all graphs and name each bnode
-  var namer = new UniqueNamer('_:b');
-  _createNodeMap(input, state.graphs, state.graph, namer);
-
-  // TODO: fix 'state.link' for changes to @merged
 
   // frame the subjects
   var framed = [];
-  var subjects = Object.keys(state.graphs[state.graph]).sort();
+  var subjects = Object.keys(state.graphMap[state.graph]).sort();
   _frame(state, subjects, frame, framed, null);
+} catch(ex) {
+  console.log(ex.stack);
+}
   return framed;
 };
 
@@ -3413,6 +3415,8 @@ Processor.prototype.toRDF = function(input, options) {
   var namer = new UniqueNamer('_:b');
   var nodeMap = {'@default': {}};
   _createNodeMap(input, nodeMap, '@default', namer);
+  // FIXME: call this.createNodeMap instead? seems like it would be missing
+  // properties about named graphs otherwise
 
   var dataset = {};
   var graphNames = Object.keys(nodeMap).sort();
@@ -4255,9 +4259,6 @@ function _createNodeMap(input, graphs, graph, namer, name, list) {
       if(!(name in graphs)) {
         graphs[name] = {};
       }
-      if('@merged' in graphs) {
-        _createNodeMap(input[property], graphs, '@merged', namer);
-      }
       _createNodeMap(input[property], graphs, name, namer);
       continue;
     }
@@ -4325,7 +4326,7 @@ function _createNodeMap(input, graphs, graph, namer, name, list) {
   }
 }
 
-function _mergeNodeMaps(graphs) {
+function _mergeNamedGraphsIntoDefault(graphs) {
   // add all non-default graphs to default graph
   var defaultGraph = graphs['@default'];
   var graphNames = Object.keys(graphs).sort();
@@ -4355,6 +4356,47 @@ function _mergeNodeMaps(graphs) {
     }
   }
   return defaultGraph;
+}
+
+function _createMergedGraph(graphMap) {
+  // generate a '@merged' graph from all graphs
+  var merged = {};
+  var graphNames = Object.keys(graphMap).sort();
+  for(var i = 0; i < graphNames.length; ++i) {
+    var graphName = graphNames[i];
+    var nodeMap = graphMap[graphName];
+    for(var id in nodeMap) {
+      var subject = nodeMap[id];
+      var mergedSubject;
+      if(id in merged) {
+        mergedSubject = merged[id];
+      } else {
+        mergedSubject = merged[id] = {'@id': id};
+      }
+
+      // iterate over subject properties
+      var properties = Object.keys(subject).sort();
+      for(var pi = 0; pi < properties.length; ++pi) {
+        var property = properties[pi];
+
+        // copy keywords
+        if(_isKeyword(property)) {
+          mergedSubject[property] = _clone(subject[property]);
+          continue;
+        }
+
+        // merge objects
+        var objects = subject[property];
+        for(var oi = 0; oi < objects.length; ++oi) {
+          jsonld.addValue(
+            mergedSubject, property, _clone(objects[oi]),
+            {propertyIsArray: true});
+        }
+      }
+    }
+  }
+  graphMap['@merged'] = merged;
+  console.log('MERGED', JSON.stringify(merged, null, 2));
 }
 
 /**
@@ -4449,12 +4491,12 @@ function _frame(state, subjects, frame, parent, property) {
     });
 
     // if subject is a graph, recurse into it
-    if(id in state.graphs) {
-      console.log('\n***recurse', id, state.graphs);
+    if(id in state.graphMap) {
+      console.log('\n***recurse', id, state.graphMap);
       console.log('recursion frame', frame);
       state.graphStack.push(state.graph);
       state.graph = id;
-      _frame(state, Object.keys(state.graphs[id]), [frame], output, '@graph');
+      _frame(state, Object.keys(state.graphMap[id]), [frame], output, '@graph');
       state.graph = state.graphStack.pop();
     }
 
@@ -4645,7 +4687,7 @@ function _filterSubjects(state, subjects, frame, flags) {
   var rval = {};
   for(var i = 0; i < subjects.length; ++i) {
     var id = subjects[i];
-    var subject = state.graphs[state.graph][id];
+    var subject = state.graphMap[state.graph][id];
     if(_filterSubject(subject, frame, flags)) {
       rval[id] = subject;
     }
