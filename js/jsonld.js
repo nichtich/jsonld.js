@@ -4490,15 +4490,36 @@ function _frame(state, subjects, frame, parent, property) {
       graph: state.graph
     });
 
-    // if not selecting from the merged graph and the subject is a graph,
-    // recurse into it
-    if(state.graph !== '@merged' && id in state.graphMap) {
-      console.log('\n***recurse', id, state.graphMap);
-      console.log('recursion frame', frame);
-      state.graphStack.push(state.graph);
-      state.graph = id;
-      _frame(state, Object.keys(state.graphMap[id]), [frame], output, '@graph');
-      state.graph = state.graphStack.pop();
+    // subject is a graph
+    if(id in state.graphMap) {
+      // check frame's "@graph" to see what to do next
+      // 1. if it doesn't exist and state.graph === "@merged", don't recurse
+      // 2. if it doesn't exist and state.graph !== "@merged", recurse
+      // 3. if "@merged" then don't recurse
+      // 4. if "@default" then don't recurse
+      // 5. recurse
+      var recurse = false;
+      var subframe;
+      if(!('@graph' in frame)) {
+        recurse = (state.graph !== '@merged');
+        subframe = {};
+      } else {
+        subframe = frame['@graph'][0];
+        recurse = !(subframe === '@merged' || subframe === '@default');
+        if(_isString(subframe)) {
+          subframe = {};
+        }
+      }
+      // TODO: add test case for frame: {"@id": "foo", "@graph": {"@type": "bar"}}
+      console.log('potential recursion frame', subframe);
+      if(recurse) {
+        console.log('\n***recurse', id, state.graphMap);
+        state.graphStack.push(state.graph);
+        state.graph = id;
+        _frame(
+          state, Object.keys(state.graphMap[id]), [subframe], output, '@graph');
+        state.graph = state.graphStack.pop();
+      }
     }
 
     // iterate over subject properties

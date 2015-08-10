@@ -8,13 +8,15 @@
     "@id": "urn:id-2",
     "@graph": {
       "@id": "urn:id-2",
-      "term": "data"
+      "term": "foo"
     }
   },
   "preserve": {
-    "@graph": {
-      "@id": "urn:id-3",
-      "term": "data"
+    "deep": {
+      "@graph": {
+        "@id": "urn:id-3",
+        "term": "bar"
+      }
     }
   }
 }

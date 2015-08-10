@@ -22,9 +22,16 @@
   }, {
     "@id": "#t0003",
     "@type": ["jld:PositiveEvaluationTest", "jld:FrameTest"],
-    "name": "Merge some graphs and preserve others",
+    "name": "Merge one graph and preserve another",
     "input": "frame-0003-in.jsonld",
     "frame": "frame-0003-frame.jsonld",
     "expect": "frame-0003-out.jsonld"
+  }, {
+    "@id": "#t0004",
+    "@type": ["jld:PositiveEvaluationTest", "jld:FrameTest"],
+    "name": "Merge one graph and deep preserve another",
+    "input": "frame-0004-in.jsonld",
+    "frame": "frame-0004-frame.jsonld",
+    "expect": "frame-0004-out.jsonld"
   }]
 }

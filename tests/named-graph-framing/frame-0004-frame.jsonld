@@ -3,7 +3,8 @@
     "@vocab": "urn:"
   },
   "@type": "Class",
-  "term": {
-    "@graph": {}
+  "preserve": {
+    "@graph": {},
+    "deep": ""
   }
 }
